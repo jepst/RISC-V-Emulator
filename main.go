@@ -74,6 +74,10 @@ func main() {
 		}
 
 		emulator.BatchRun(elfFilePath, asmFilePath, seedInts, true)
+	} else if len(args) == 3 && args[0] == "runConsole" {
+		asmFilePath := args[1]
+		elfFilePath := args[2]
+		emulator.RunConsole(elfFilePath, asmFilePath)
 	} else {
 		log.Fatalln("Invalid arguments:", os.Args)
 	}

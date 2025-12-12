@@ -15,6 +15,17 @@ import (
 
 // Evaluation is for measuring accuracy of a single run or multiple runs. To be used in tandem with the
 // extension or an autograder
+type ConsoleRunResult struct {
+	Passed    bool   `json:"passed"`
+	DynInst   int    `json:"dyninst"`   // stats
+	StatInst  int    `json:"statinst"`   // stats
+	RegsUsed  int    `json:"regsused"` // stats
+	MemUsed   int    `json:"memused"`  // stats
+	Stdout    string `json:"stdout"`
+	Regs      [32]uint32 `json:"regs"`
+	Pc        uint32 `json:"pc"`
+	GlobalMemory []uint32 `json:"globalmemory"`
+}
 
 type EvaluationRunResult struct {
 	Seed      uint32 `json:"seed"`
@@ -92,6 +103,103 @@ func BatchRun(elfFilePath, asmFilePath string, seeds []uint32, streamToStdout bo
 
 	return finalResults, nil
 }
+
+func RunConsole(elfFilePath, asmFilePath string) {
+	memImg, e := buildMemoryImage(elfFilePath, asmFilePath)
+	if e != nil {
+		msg := streamingMessage{
+			Type: "error",
+			Body: e.Error(),
+		}
+		mb, _ := json.Marshal(msg)
+		fmt.Println(string(mb))
+		return
+	}
+	const seed uint32 = 0
+	const bufferSize = 2048
+	const instructionCount = 1_000_000
+
+	stdout := make(chan byte, bufferSize)
+	stderr := make(chan RuntimeException, 0)
+
+	config := EmulatorConfig{
+		StackStartAddress:       0x7FFFFFF0,
+		GlobalDataAddress:       memImg.asmGlobalPointer,
+		OSGlobalPointer:         memImg.osGlobalPointer,
+		HeapStartAddress:        0x10000000,
+		Memory:                  memImg.image.Clone(),
+		ProfileIgnoreRangeStart: memImg.osCodeStart,
+		ProfileIgnoreRangeEnd:   memImg.osCodeEnd,
+		RandomSeed:              seed,
+		RuntimeErrorCallback: func(e RuntimeException) {
+			stderr <- e
+		},
+		StdOutCallback: func(b byte) {
+			stdout <- b
+		},
+		RuntimeLimit: instructionCount,
+	}
+
+
+	emulator := NewEmulator(config)
+	go func() {
+		emulator.Emulate(memImg.osEntry)
+		config.GlobalDataAddress = memImg.asmGlobalPointer
+		emulator.ResetRegisters(config)
+		emulator.Emulate(memImg.assemblyEntry)
+		close(stdout)
+	}()
+
+
+	var sb strings.Builder
+	for {
+		done := false
+		select {
+		case b, ok := <-stdout:
+			if !ok {
+				done = true
+				break
+			}
+			sb.WriteByte(b)
+		case err := <-stderr:
+			msg := streamingMessage{
+				Type: "error",
+				Body: fmt.Sprintf("%s at pc=0x%x",err.message, err.pc),
+			}
+			mb, _ := json.Marshal(msg)
+			fmt.Println(string(mb))
+			return			
+		}
+		if done {
+			break
+		}
+	}
+
+	globalMemory := [1024]uint32{}
+	memStart := config.GlobalDataAddress
+	for i:=0; i<len(globalMemory); i++ {
+		globalMemory[i] = emulator.memReadWord(memStart+uint32(i)*4, false)
+	}
+	result := ConsoleRunResult{
+		Passed:    emulator.solutionValidity == 2,
+		DynInst:   int(emulator.di),
+		StatInst:  memImg.asmStaticInstructionCount,
+		RegsUsed:  int(emulator.regUsage),
+		MemUsed:   int(emulator.memUsage) + memImg.asmStaticMemoryCount,
+		Stdout:    sb.String(),
+		Regs:      emulator.registers,
+		Pc:        emulator.pc,
+		GlobalMemory: globalMemory[:],
+	}
+
+	msg := streamingMessage{
+		Type: "result",
+		Body: result,
+	}
+	mb, _ := json.Marshal(msg)
+	fmt.Println(string(mb))
+}
+
 
 func evalWorker(memImg memoryImageContext, seedQueue chan uint32, stdOutMutex *sync.Mutex, streamToStdout bool, results chan EvaluationRunResult) {
 	for seed := range seedQueue {
