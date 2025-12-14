@@ -997,6 +997,7 @@ func sendScreenUpdates() {
 		Status  string                 `json:"status"`
 		Stats   map[string]int         `json:"stats"`
 		Memory  map[string]string      `json:"memory"`
+		Registers [32]uint32           `json:"registers"`
 	}
 
 	// Get current gp memory and stack memory
@@ -1007,6 +1008,7 @@ func sendScreenUpdates() {
 
 	mainMemory := getMemoryBase64(int(gp), false, 2)
 	stackMemory := getMemoryBase64(int(sp), true, 1)
+	registers := liveEmulator.registers
 
 	packet := ScreenUpdate{
 		Width:   liveEmulator.display.width,
@@ -1025,6 +1027,7 @@ func sendScreenUpdates() {
 			"main":  mainMemory,
 			"stack": stackMemory,
 		},
+		Registers: registers,
 	}
 
 	sendEvent("riscv_screen", packet)
