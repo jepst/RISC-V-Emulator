@@ -118,6 +118,8 @@ func dispatchCommand(command string, data json.RawMessage, seq int) {
 		handleConfigDone(data, seq)
 	case "setBreakpoints":
 		handleSetBreakpoints(data, seq)
+	case "setBreakpointOnStart":
+		handleSetBreakpointOnStart(data, seq)
 	case "setExceptionBreakpoints":
 		sendResponse("setExceptionBreakpoints", seq, true, EmptyResponse{})
 	case "threads":
@@ -183,6 +185,8 @@ func handleLaunch(data json.RawMessage, seq int) {
 	initDebugger(launchInfo["program"].(string), assignmentPath, seq, randomSeed)
 
 	sendResponse("launch", seq, true, EmptyResponse{})
+
+	sendScreenUpdates()
 }
 
 func handleRestart(data json.RawMessage, seq int) {
@@ -222,6 +226,7 @@ func handleTerminate(data json.RawMessage, seq int) {
 	liveEmulator = nil
 
 	sendResponse("terminate", seq, true, EmptyResponse{})
+	sendScreenUpdates()
 }
 
 func initDebugger(assemblyPath string, assignmentPath string, seq int, randomSeed uint32) {
@@ -432,6 +437,7 @@ func initDebugger(assemblyPath string, assignmentPath string, seq int, randomSee
 
 		sendEvent("stopped", eventBody)
 		continueChan = make(chan bool)
+		sendScreenUpdates()
 		<-continueChan
 	}
 
@@ -517,6 +523,7 @@ func handleStepOver(seq int) {
 	}
 
 	sendResponse("next", seq, true, EmptyResponse{})
+
 }
 
 func handleStepIn(seq int) {
@@ -589,6 +596,37 @@ func handleGetStacktrace(data json.RawMessage, seq int) {
 }
 
 var breakpointIDCounter = 1
+
+func handleSetBreakpointOnStart(data json.RawMessage, seq int) {
+	var reqBody map[string]interface{}
+	json.Unmarshal(data, &reqBody)
+
+	if liveEmulator == nil {
+		sendResponse("setBreakpoints", seq, false, ErrorBody{Error: ErrorMessage{
+			ID:     105,
+			Format: "No emulator is running to add breakpoints to.",
+		}})
+		return
+	}
+
+	liveEmulator.RemoveAllBreakpoints()
+
+	var breakpoint Breakpoint
+	breakpoint.ID = breakpointIDCounter
+	breakpoint.Line = liveAssembledResult.GetLineOfAddress(0, assemblyEntry)
+	breakpoint.Source = Source {
+		Name: liveAssembledResult.FileName,
+	}
+	breakpoint.condition = ""
+	breakpoint.Verified=true
+	breakpoint.addr = assemblyEntry
+	breakpointIDCounter++
+
+	liveEmulator.AddBreakpoint(assemblyEntry, breakpoint)
+
+	sendResponse("setBreakpoints", seq, true, EmptyResponse{})
+}
+
 
 func handleSetBreakpoints(data json.RawMessage, seq int) {
 	reqBody := SetBreakpointsRequest{}
@@ -1009,6 +1047,7 @@ func sendScreenUpdates() {
 	mainMemory := getMemoryBase64(int(gp), false, 2)
 	stackMemory := getMemoryBase64(int(sp), true, 1)
 	registers := liveEmulator.registers
+	instructions := liveAssembledResult.GetSourceLineFromAddress(liveEmulator.pc - assemblyEntry)
 
 	packet := ScreenUpdate{
 		Width:   liveEmulator.display.width,
@@ -1026,6 +1065,7 @@ func sendScreenUpdates() {
 		Memory: map[string]string{
 			"main":  mainMemory,
 			"stack": stackMemory,
+			"instruction": instructions,
 		},
 		Registers: registers,
 	}

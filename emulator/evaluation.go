@@ -120,7 +120,7 @@ func RunConsole(elfFilePath, asmFilePath string) {
 	const instructionCount = 1_000_000
 
 	stdout := make(chan byte, bufferSize)
-	stderr := make(chan RuntimeException, 0)
+	stderr := make(chan RuntimeException, bufferSize)
 
 	config := EmulatorConfig{
 		StackStartAddress:       0x7FFFFFF0,
@@ -149,7 +149,6 @@ func RunConsole(elfFilePath, asmFilePath string) {
 		emulator.Emulate(memImg.assemblyEntry)
 		close(stdout)
 	}()
-
 
 	var sb strings.Builder
 	for {
