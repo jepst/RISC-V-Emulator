@@ -34,6 +34,20 @@ func (r *AssembledResult) GetTextLabelForAddress(address uint32) string {
 	return closestLabel
 }
 
+func (r *AssembledResult) GetSourceLineFromAddress(address uint32) string {
+	line, ok := r.AddressToLine[address]
+	if !ok {
+		return "??? Unknown location"
+	}
+	lineContent := r.fileContents[line]
+	commentIndex := strings.Index(lineContent, "#")
+	if commentIndex != -1 {
+		lineContent = lineContent[:commentIndex]
+	}
+	lineContent = strings.TrimSpace(lineContent)
+	return lineContent
+}
+
 func (r *AssembledResult) PrettyPrintInstruction(address uint32) string {
 	// should be in the form of: fileName:lineNumber label
 	if _, ok := r.AddressToLine[address]; !ok {
