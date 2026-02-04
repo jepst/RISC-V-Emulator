@@ -609,20 +609,33 @@ func handleSetBreakpointOnStart(data json.RawMessage, seq int) {
 		return
 	}
 
+	// by default, use the first line as the breakpoint
+	// if a label is specified in the request, use that location,
+	// if possible, instead
+	breakpointAddress := assemblyEntry
+	label, ok := reqBody["label"].(string)
+	if ok {
+		labelAddress, ok := liveAssembledResult.Labels[label]
+		if ok {
+			breakpointAddress += labelAddress
+		}
+	}
+
+
 	liveEmulator.RemoveAllBreakpoints()
 
 	var breakpoint Breakpoint
 	breakpoint.ID = breakpointIDCounter
-	breakpoint.Line = liveAssembledResult.GetLineOfAddress(0, assemblyEntry)
+	breakpoint.Line = liveAssembledResult.GetLineOfAddress(0, breakpointAddress)
 	breakpoint.Source = Source {
 		Name: liveAssembledResult.FileName,
 	}
 	breakpoint.condition = ""
 	breakpoint.Verified=true
-	breakpoint.addr = assemblyEntry
+	breakpoint.addr = breakpointAddress
 	breakpointIDCounter++
 
-	liveEmulator.AddBreakpoint(assemblyEntry, breakpoint)
+	liveEmulator.AddBreakpoint(breakpointAddress, breakpoint)
 
 	sendResponse("setBreakpoints", seq, true, EmptyResponse{})
 }
